@@ -1,0 +1,31 @@
+{
+  "name": "csvtomysql",
+  "version": "1.0.0",
+  "description": "converts csv data to Mysql data and uploads it to nycss database",
+  "main": "index.js",
+  "scripts": {
+    "test": "dude"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yonichanowitz/csvToMysql.git"
+  },
+  "keywords": [
+    "csv",
+    "mysql",
+    "data"
+  ],
+  "author": "yonichanowitz",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yonichanowitz/csvToMysql/issues"
+  },
+  "homepage": "https://github.com/yonichanowitz/csvToMysql#readme",
+  "dependencies": {
+    "csvtojson": "^2.0.10",
+    "dotenv": "^10.0.0",
+    "mysql": "^2.18.1",
+    "node-xlsx": "^0.17.2",
+    "yargs": "^17.2.1"
+  }
+}
