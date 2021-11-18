@@ -1,11 +1,12 @@
 require('dotenv').config();
-import csvtojson from 'csvtojson';
-import { createConnection } from "mysql";
-import xlsx from 'node-xlsx';
-import fs from 'fs';
-import { resolve } from 'path';
-import { rejects } from 'assert';
-import { getHeapSpaceStatistics } from 'v8';
+const csvtojson = require('csvtojson');
+const mysql = require("mysql");
+const util = require("util"); 
+const nodexlsx = require('node-xlsx');
+const fs = require('fs');
+// import { resolve } from 'path';
+// import { rejects } from 'assert';
+// import { getHeapSpaceStatistics } from 'v8';
 
 //column name list array
 let colNameList;
@@ -56,11 +57,12 @@ const fileName = process.argv[2];
 // }
 
 // Establish connection to the database
-let conn = createConnection({
+const conn = mysql.createConnection({
 	host: hostname,
 	user: username,
 	password: password,
 	database: process.argv[3],
+	multipleStatements: true,
 });
 
 
@@ -82,37 +84,69 @@ conn.connect(async(err) => {
 	if (err) {return console.error(
 			'error: ' + err.message);
 		}
-	
+// conn.query = util.promisify(conn.query).bind(conn);
 	// const getColNameStatement = `SELECT COLUMN_NAME  FROM INFORMATION_SCHEMA.COLUMNS`;
 
 	
-	conn.query(getColNameStatement, 
-		(err, results) => {
-		if (err) {
-			return console.log(err);
-		};
+	// conn.query(getColNameStatement, 
+	// 	(err, results) => {
+	// 	if (err) {
+	// 		return console.log(err);
+	// 	};
 		
-		setColNameList(results);
-	})		
+	// 	setColNameList(results);
+	// })		
 
 });
 
 
 csvtojson().fromFile(fileName).then(source => {
 
-	let 
+	//helper function to get words with uppercase
+	function changedLanguageData(columField) {
+		var splitUp = columField.split(/\/|\s/); 
+		return splitUp.forEach(word => {
+			word.replace(word.charAt(0),word.charAt(0).toUpperCase())
+		})
+	};
+	function convertDateToMysql(csvDate) {
+		if(csvDate.length < 8) {
+			return null;
+		};
+		var splitArr = csvDate.split("/");
+		var monthAddedZero = splitArr[0] < 10 ? '0'.concat(splitArr[0]) : splitArr[0];
+		var dayAddedZero = splitArr[1] < 10 ? '0'.concat(splitArr[1]) : splitArr[1];
+		var yearAdd = splitArr[2] < 100 ? '20'.concat(splitArr[2]) : splitArr[2];
+		var returnArr = [yearAdd,monthAddedZero,dayAddedZero].join("-");
+
+		return returnArr;
+	};
+	// function queryReturnIdFrom(table, referenceColumn){
+	// 	//query table for id that is same as string in statusName
+	// 		return new Promise(	function (resolve, reject){
+	// 			conn.query('SELECT id FROM ?? WHERE name = ?', [table, referenceColumn], 
+	// 			(err, results) => {
+	// 			if (err) {
+	// 				reject(err);
+	// 			};
+	// 				resolve(results);
+	// 			})
+	// 		}
+	// 	);
+	// };
+
 	// Fetching the data from each row
 	
 	for (let i = 0; i < source.length; i++) {
+		let clientId = "";
 		let clientsTable ={
 				first_name: source[i]["FIRST NAME"],
 				last_name: source[i]["LAST NAME"],
-				dob: source[i]['DOB'],
+				dob: source[i]["DOB"] === '' ? '1000-01-01' : convertDateToMysql(source[i]["DOB"]) ,
 				// age: source[i]["AGE"],
 				gender: source[i]["GENDER"],
 				marital_status: source[i]["MARITAL STATUS"],
-				deceased_date: source[i]['DECEASED/PASSED AWAY DATE'],
-				status_id: queryReturnIdFrom('client_statuses',source[i]['CLIENT STATUS']),
+				deceased_date: source[i]['DECEASED/PASSED AWAY DATE'] === '' ? '1000-01-01' : convertDateToMysql(source[i]['DECEASED/PASSED AWAY DATE'].slice(12)),
 				// EMAIL ADDRESS	
 			};
 		let doctorsTable = {
@@ -121,7 +155,7 @@ csvtojson().fromFile(fileName).then(source => {
 			work_phone = PHONE 1
 			if row where first_name and last_name !== firstName and lastName, insert in doctors table, and get doctor id
 			else, get doctor id
-			on referrals pivot table, add client_id = client.id, and doctor_id = doctor id*/
+			on referrals pivot table, add client_id = clientId, and doctor_id = doctor id*/
 			
 			//need distinction between current doctor and refferal doctor
 
@@ -137,29 +171,21 @@ csvtojson().fromFile(fileName).then(source => {
 			capitalize each word
 			check if any of the string is === one of the languages on languages table
 			if false, add language to language table, 
-				and update person_language pivot table with person_id = client.id, person_type = clients and language_id languages.id
-			else update person_language pivot table with person_id = client.id, person_type = clients and language_id languages.id
+				and update person_language pivot table with person_id = clientId, person_type = clients and language_id languages.id
+			else update person_language pivot table with person_id = clientId, person_type = clients and language_id languages.id
 			 */
-			changedLanguageData: () => {var splitUp = source[i]['LANGUAGE'].split(' '|'/'); return splitUp.replace(splitUp.charAt(0),splitUp.charAt(0).toUpperCase())},
 
-			name: conn.query('INSERT IGNORE INTO languages WHERE NAME = ?', changedLanguageData, 
-				function(err, result) {
-					if(err) {
-						console.log(err);
-					}
-
-			}),
+			name: source[i]['LANGUAGE']
 				
 		};
 		let clientPhoneNumbersTable = {
 			//two insert statements
-			client_id = client.id,
-			number = source[i]['CELL PHONE #'],
-			type = "cell",
+			client_id: clientId,
+			number: source[i]['CELL PHONE #'],
+			type: "cell",
 			
-			client_id = client.id,
-			number = source[i]['HOME PHONE #'],
-			type = "home",
+			number: source[i]['HOME PHONE #'],
+			type: "home",
 		};
 		let clientAddressesTable = {
 			address_line_1: source[i]['ADDRESS'],
@@ -173,86 +199,112 @@ csvtojson().fromFile(fileName).then(source => {
 			company: source[i]['INSURANCE PLAN'],
 			type: source[i]['TYPE']	
 		};
-		let clientContactsTable = {
-			// two insert statements
+		let clientContactsTable1 = {
 
-			client_id: client.id,
+			client_id: clientId,
 			//split source[i]['CONTACT 1: NAME'] on space. first part of string = firstName, second part of string = lastName
-			first_name: firstName,
-			last_name: lastName,
-			relationship: souurce[i]['CONTACT 1: RELATIONSHIP'],
+			first_name: source[i]['CONTACT 1: NAME'].split(' ')[0],
+			last_name: source[i]['CONTACT 1: NAME'].split(' ')[1],
+			relationship: source[i]['CONTACT 1: RELATIONSHIP'],
 			phone: source[i]['CONTACT 1: NUMBER'],
 			email: source[i]['CONTACT 1: EMAIL ADDRESS'],
 
-			client_id: client.id,
+		};
+		let clientContactsTable2 = {
+
+			client_id: clientId,
 			//split source[i]['CONTACT 2: NAME'] on space. first part of string = firstName, second part of string = lastName
-			first_name: firstName,
-			last_name: lastName,
-			relationship: souurce[i]['CONTACT 2: RELATIONSHIP'],
+			first_name: source[i]['CONTACT 2: NAME'].split(' ')[0],
+			last_name: source[i]['CONTACT 2: NAME'].split(' ')[1],
+			relationship: source[i]['CONTACT 2: RELATIONSHIP'],
 			phone: source[i]['CONTACT 2: NUMBER'],
 			email: source[i]['CONTACT 2: EMAIL ADDRESS'],
 		};
-		let clientDiagnosesTable = {// DIAGNOSIS 	
-			// STAGE	
-			// CELL DESCRIPTION (ESTROGEN, PROGESTERONE, PROLIFERATION)	
-			// DATE OF DIAGNOSIS	
-			// AGE UPON DIAGNOSIS
+		let clientDiagnosesTable = {
+			client_id: clientId,
+			diagnosis: source[i]['DIAGNOSIS'], 	
+			stage: source[i]['STAGE	'],
+			cell_description: source[i]['CELL DESCRIPTION (ESTROGEN, PROGESTERONE, PROLIFERATION)'],	
+			diagnosis_date: source[i]['DATE OF DIAGNOSIS'],	
+
+
+			age_upon_remission: source[i]['AGE UPON DIAGNOSIS'],
 			// REMISSION Y/N	
-			// REMISSION DATE	
-			// NOTES:
-		}
-
-
-
-		function queryReturnIdFrom(table, referenceColumn){
-			//query table for id that is same as string in statusName
-				
-			conn.query('SELECT id FROM ?? WHERE name = ?', [table, referenceColumn], 
-				(err, results) => {
-				if (err) {
-					return console.log(err);
-				};
-				return results;
-			})
+			remission_date: source[i]['REMISSION DATE'],	
+			notes: source[i]['NOTES:']
 		};
-				
-		
+		let clientTreatmentsTable = {
+			// TREATMENTS	
+			start_date: source[i]['TREATMENT START DATE'],	
+			// SURGERIES	
+			type: source[i]['MEDICINES']
+		}
+		let clientChildrenTable = {
+			dob: source[i]['CHILDREN/ DOB']
+		};		
 			
 			// ACCOMPANIED BY	
 			// ACCOMPANIED RELATIONSHIP	
 			
 			// HAS DONE SCANS, TESTS	
-
-			// SURGERIES	
-			// MEDICINES	
-			// TREATMENTS	
-			// TREATMENT START DATE	
 				
-
 			// STAFF MEMBER MEETING WITH FAMILY	
 			// DATE CLIENT SPOKE TO STAFF	
-			// CHILDREN/ DOB	
 			
 			// CARING CONNECTION		
 			// OFFERING:
 
 
-		var insertStatement =
-		`INSERT INTO sample values(?, ?, ?, ?)`;
-		var items = [Name, Email, Age, City];
-
 		// Inserting data of current row
 		// into database
+	
+		function firstQueryFromObject (tname, tableObj){
+			let tableName = tname;
 
-		conn.query(`INSERT INTO clients (first_name, last_name) VALUES ('yechi', 'hamelech')`, 
-		(err, results) => {
-		if (err) {
-			console.log(err);
-			return;
+			let columns = Object.keys(tableObj);  // create array of column names
+			let values = Object.values(tableObj); //create array of values
+			columns = columns.join(", "); //join coulmns into string 
+			values = "'" + values.join("', '") + "'"; //join values to string
+			return `INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}'));`; //create query
 		};
-		console.log("Succesfully added! " + results.insertId);
-	})	
+		function assembleQueryFromObject (tname, tableObj){
+			let tableName = tname;
 
+			let columns = Object.keys(tableObj);  // create array of column names
+			let values = Object.values(tableObj); //create array of values
+			columns = columns.join(", "); //join coulmns into string 
+			values = "'" + values.join("', '") + "'"; //join values to string
+			return `INSERT IGNORE INTO ${tableName} (${columns}) VALUE (${values});`; //create query
+		};
+		
+
+		conn.query(firstQueryFromObject('clients', clientsTable), 
+			(err, results) => {
+			if (err) {
+				console.log(err);
+				return;
+			};
+
+			clientId = results.insertId;
+
+			conn.query('START TRANSACTION; ' + 
+				assembleQueryFromObject('client_phone_numbers', clientPhoneNumbersTable) +
+				assembleQueryFromObject('client_addresses', clientAddressesTable) +
+				assembleQueryFromObject('insurance_plans', insurancePlansTable) +
+				assembleQueryFromObject('client_contacts', clientContactsTable1) +
+				assembleQueryFromObject('client_contacts', clientContactsTable2) +
+				assembleQueryFromObject('client_diagnoses', clientDiagnosesTable) +
+				assembleQueryFromObject('client_treatments', clientTreatmentsTable) +
+				assembleQueryFromObject('client_children', clientChildrenTable) +
+				+ 'COMMIT;',
+			(err, results) => {
+				console.log(err);
+			});
+
+			console.log("Succesfully added! " + results.insertId);
+		
+		})	
+	setTimeout(() => conn.end(), 5000);
 
 	}
 
@@ -262,4 +314,4 @@ csvtojson().fromFile(fileName).then(source => {
     
 });
 
-// conn.end();
+// conn.end()
