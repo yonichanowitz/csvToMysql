@@ -1,6 +1,6 @@
 require('dotenv').config();
 const csvtojson = require('csvtojson');
-const mysql = require("mysql");
+const mysql = require("mysql2");
 const util = require("util"); 
 const nodexlsx = require('node-xlsx');
 const fs = require('fs');
@@ -56,16 +56,6 @@ const fileName = process.argv[2];
 //     });
 // }
 
-// Establish connection to the database
-const conn = mysql.createConnection({
-	host: hostname,
-	user: username,
-	password: password,
-	database: process.argv[3],
-	multipleStatements: true,
-});
-
-
 //helper function to send data from db query to variable. gets list of db columns with lowercase names
 function setColNameList(dbNameData) {
 	const justColNames = dbNameData.map(colName => colName.COLUMN_NAME);
@@ -80,10 +70,10 @@ function setColNameList(dbNameData) {
 	
 };
 
-conn.connect(async(err) => {
-	if (err) {return console.error(
-			'error: ' + err.message);
-		}
+// conn.connect(async(err) => {
+// 	if (err) {return console.error(
+// 			'error: ' + err.message);
+// 		}
 // conn.query = util.promisify(conn.query).bind(conn);
 	// const getColNameStatement = `SELECT COLUMN_NAME  FROM INFORMATION_SCHEMA.COLUMNS`;
 
@@ -97,7 +87,7 @@ conn.connect(async(err) => {
 	// 	setColNameList(results);
 	// })		
 
-});
+// });
 
 
 csvtojson().fromFile(fileName).then(source => {
@@ -135,10 +125,19 @@ csvtojson().fromFile(fileName).then(source => {
 	// 	);
 	// };
 
+	//establish DB connection
+	const conn = mysql.createConnection({
+		host: hostname,
+		user: username,
+		password: password,
+		database: process.argv[3],
+		multipleStatements: true,
+	});
+
 	// Fetching the data from each row
 	
 	for (let i = 0; i < source.length; i++) {
-		let clientId = "";
+		let clientId = [];
 		let clientsTable ={
 				first_name: source[i]["FIRST NAME"],
 				last_name: source[i]["LAST NAME"],
@@ -180,7 +179,6 @@ csvtojson().fromFile(fileName).then(source => {
 		};
 		let clientPhoneNumbersTable = {
 			//two insert statements
-			client_id: clientId,
 			number: source[i]['CELL PHONE #'],
 			type: "cell",
 			
@@ -201,7 +199,6 @@ csvtojson().fromFile(fileName).then(source => {
 		};
 		let clientContactsTable1 = {
 
-			client_id: clientId,
 			//split source[i]['CONTACT 1: NAME'] on space. first part of string = firstName, second part of string = lastName
 			first_name: source[i]['CONTACT 1: NAME'].split(' ')[0],
 			last_name: source[i]['CONTACT 1: NAME'].split(' ')[1],
@@ -212,7 +209,6 @@ csvtojson().fromFile(fileName).then(source => {
 		};
 		let clientContactsTable2 = {
 
-			client_id: clientId,
 			//split source[i]['CONTACT 2: NAME'] on space. first part of string = firstName, second part of string = lastName
 			first_name: source[i]['CONTACT 2: NAME'].split(' ')[0],
 			last_name: source[i]['CONTACT 2: NAME'].split(' ')[1],
@@ -221,7 +217,7 @@ csvtojson().fromFile(fileName).then(source => {
 			email: source[i]['CONTACT 2: EMAIL ADDRESS'],
 		};
 		let clientDiagnosesTable = {
-			client_id: clientId,
+
 			diagnosis: source[i]['DIAGNOSIS'], 	
 			stage: source[i]['STAGE	'],
 			cell_description: source[i]['CELL DESCRIPTION (ESTROGEN, PROGESTERONE, PROLIFERATION)'],	
@@ -254,57 +250,49 @@ csvtojson().fromFile(fileName).then(source => {
 			// CARING CONNECTION		
 			// OFFERING:
 
+		function assembleQueryFromObject (firstTable, firstObject){
+			let tableName = firstTable;
 
-		// Inserting data of current row
-		// into database
+			let columns = Object.keys(firstObject);  // create array of column names
+			let values = Object.values(firstObject); //create array of values
+			columns = columns.join(", "); //join coulmns into string 
+			values = "'" + values.join("', '") + "'"; //join values to string
+			return `START TRANSACTION; INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}')) ON DUPLICATE KEY UPDATE first_name=first_name; SELECT LAST_INSERT_ID() INTO @csvToMysqlTempId;` 
 	
-		function firstQueryFromObject (tname, tableObj){
+		
+		};
+		function secondQueries(tname, tableobject){
 			let tableName = tname;
 
-			let columns = Object.keys(tableObj);  // create array of column names
-			let values = Object.values(tableObj); //create array of values
+			let columns = Object.keys(tableobject);  // create array of column names
+			let values = Object.values(tableobject); //create array of values
 			columns = columns.join(", "); //join coulmns into string 
 			values = "'" + values.join("', '") + "'"; //join values to string
-			return `INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}'));`; //create query
+			return `INSERT IGNORE INTO ${tableName} (client_id, ${columns}) VALUE (@csvToMysqlTempId, ${values}) ON DUPLICATE KEY UPDATE id=id`;
 		};
-		function assembleQueryFromObject (tname, tableObj){
-			let tableName = tname;
 
-			let columns = Object.keys(tableObj);  // create array of column names
-			let values = Object.values(tableObj); //create array of values
-			columns = columns.join(", "); //join coulmns into string 
-			values = "'" + values.join("', '") + "'"; //join values to string
-			return `INSERT IGNORE INTO ${tableName} (${columns}) VALUE (${values});`; //create query
-		};
+
+		conn.promise().query(assembleQueryFromObject('clients', clientsTable) 
+		+ secondQueries('client_phone_numbers', clientPhoneNumbersTable)
+		+ secondQueries('client_addresses', clientAddressesTable)
+		+ secondQueries('insurance_plans', insurancePlansTable)
+		+ secondQueries('client_contacts', clientContactsTable1)
+		+ secondQueries('client_contacts', clientContactsTable2)
+		+ secondQueries('client_diagnoses', clientDiagnosesTable)
+		+ secondQueries('client_treatments', clientTreatmentsTable)
+		+ secondQueries('client_children', clientChildrenTable) + ` COMMIT;`
 		
-
-		conn.query(firstQueryFromObject('clients', clientsTable), 
-			(err, results) => {
-			if (err) {
-				console.log(err);
-				return;
-			};
-
-			clientId = results.insertId;
-
-			conn.query('START TRANSACTION; ' + 
-				assembleQueryFromObject('client_phone_numbers', clientPhoneNumbersTable) +
-				assembleQueryFromObject('client_addresses', clientAddressesTable) +
-				assembleQueryFromObject('insurance_plans', insurancePlansTable) +
-				assembleQueryFromObject('client_contacts', clientContactsTable1) +
-				assembleQueryFromObject('client_contacts', clientContactsTable2) +
-				assembleQueryFromObject('client_diagnoses', clientDiagnosesTable) +
-				assembleQueryFromObject('client_treatments', clientTreatmentsTable) +
-				assembleQueryFromObject('client_children', clientChildrenTable) +
-				+ 'COMMIT;',
-			(err, results) => {
-				console.log(err);
-			});
-
-			console.log("Succesfully added! " + results.insertId);
+		, 
+			
 		
-		})	
-	setTimeout(() => conn.end(), 5000);
+		).then((response) => {clientId = response; console.log(clientId[0].insertId)}).then(console.log(clientId))
+
+		
+		.catch(err => {
+			console.error(err);
+			conn.end();
+			return;
+		});
 
 	}
 
@@ -313,5 +301,3 @@ csvtojson().fromFile(fileName).then(source => {
 
     
 });
-
-// conn.end()
