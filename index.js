@@ -137,7 +137,6 @@ csvtojson().fromFile(fileName).then(source => {
 	// Fetching the data from each row
 	
 	for (let i = 0; i < source.length; i++) {
-		let clientId = [];
 		let clientsTable ={
 				first_name: source[i]["FIRST NAME"],
 				last_name: source[i]["LAST NAME"],
@@ -257,47 +256,90 @@ csvtojson().fromFile(fileName).then(source => {
 			let values = Object.values(firstObject); //create array of values
 			columns = columns.join(", "); //join coulmns into string 
 			values = "'" + values.join("', '") + "'"; //join values to string
-			return `START TRANSACTION; INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}')) ON DUPLICATE KEY UPDATE first_name=first_name; SELECT LAST_INSERT_ID() INTO @csvToMysqlTempId;` 
+			return `INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}')) ON DUPLICATE KEY UPDATE first_name=first_name;` 
 	
 		
 		};
-		function secondQueries(tname, tableobject){
+		function secondQueries(tname, tableobject, clientId){
 			let tableName = tname;
 
 			let columns = Object.keys(tableobject);  // create array of column names
 			let values = Object.values(tableobject); //create array of values
 			columns = columns.join(", "); //join coulmns into string 
 			values = "'" + values.join("', '") + "'"; //join values to string
-			return `INSERT IGNORE INTO ${tableName} (client_id, ${columns}) VALUE (@csvToMysqlTempId, ${values}) ON DUPLICATE KEY UPDATE id=id`;
+			return `START TRANSACTION; INSERT IGNORE INTO ${tableName} (${columns}, FOREIGN client_id) VALUE (${values}, '${clientId}'); COMMIT; `;
 		};
 
-
-		conn.promise().query(assembleQueryFromObject('clients', clientsTable) 
-		+ secondQueries('client_phone_numbers', clientPhoneNumbersTable)
-		+ secondQueries('client_addresses', clientAddressesTable)
-		+ secondQueries('insurance_plans', insurancePlansTable)
-		+ secondQueries('client_contacts', clientContactsTable1)
-		+ secondQueries('client_contacts', clientContactsTable2)
-		+ secondQueries('client_diagnoses', clientDiagnosesTable)
-		+ secondQueries('client_treatments', clientTreatmentsTable)
-		+ secondQueries('client_children', clientChildrenTable) + ` COMMIT;`
-		
-		, 
+		(async () => {
+			let firstQueryId = "";
 			
+			let firstQuery = new Promise( function(resolve, reject) {
+				resolve(conn.promise().query(
+					assembleQueryFromObject('clients', clientsTable)
+				)
+				// 	(err, res, fields) => {
+				// 		console.log(res.insertId);
+				// 		firstQueryId = res.insertId;
+				// 		if(err){console.error(err);}
+				// 		})
+				),
+				reject((err) => {console.log(err)
+				})
+			}
+			)
+			;
 		
-		).then((response) => {clientId = response; console.log(clientId[0].insertId)}).then(console.log(clientId))
-
 		
-		.catch(err => {
-			console.error(err);
-			conn.end();
-			return;
-		});
+			let	assignLastInsertId = firstQuery.then(function(lastId) {
+				console.log('dude');
+				firstQueryId = lastId[0].insertId;
+				console.log(firstQueryId);
+			});
 
+			let secondQuery = new Promise( function(resolve, reject) {
+				resolve(conn.promise().query(
+					secondQueries('client_phone_numbers', clientPhoneNumbersTable, firstQueryId)
+					+ secondQueries('client_addresses', clientAddressesTable, firstQueryId)
+					+ secondQueries('insurance_plans', insurancePlansTable, firstQueryId)
+					+ secondQueries('client_contacts', clientContactsTable1, firstQueryId)
+					+ secondQueries('client_contacts', clientContactsTable2, firstQueryId)
+					+ secondQueries('client_diagnoses', clientDiagnosesTable, firstQueryId)
+					+ secondQueries('client_treatments', clientTreatmentsTable, firstQueryId)
+					+ secondQueries('client_children', clientChildrenTable, firstQueryId)
+					
+					),
+				)
+				reject((err) => {console.log(err + 'second reject')})
+
+			});
+
+			let runSecomndQuery = secondQuery.then(() => {
+				console.log(firstQueryId)
+			});
+
+			await assignLastInsertId.then(() => {
+				console.log(firstQueryId + "id set");
+			})
+				
+			
+			.then(runSecomndQuery
+			
+			)
+
+			.catch(err => {
+				console.error(err);
+				// conn.end();
+				return;
+			});
+			// await .then(	() =>
+			// 	{console.log("All items stored into database successfully")
+			// })		.catch(err => {
+			// 	console.error(err);
+			// 	// conn.end();
+			// 	return;
+			// });
+		})();
+	
 	}
-
-	console.log(
-"All items stored into database successfully");
-
     
 });
