@@ -125,14 +125,7 @@ csvtojson().fromFile(fileName).then(source => {
 	// 	);
 	// };
 
-	//establish DB connection
-	const conn = mysql.createConnection({
-		host: hostname,
-		user: username,
-		password: password,
-		database: process.argv[3],
-		multipleStatements: true,
-	});
+
 
 	// Fetching the data from each row
 	
@@ -223,7 +216,7 @@ csvtojson().fromFile(fileName).then(source => {
 			diagnosis_date: source[i]['DATE OF DIAGNOSIS'],	
 
 
-			age_upon_remission: source[i]['AGE UPON DIAGNOSIS'],
+			age_upon_diagnosis: source[i]['AGE UPON DIAGNOSIS'],
 			// REMISSION Y/N	
 			remission_date: source[i]['REMISSION DATE'],	
 			notes: source[i]['NOTES:']
@@ -256,26 +249,44 @@ csvtojson().fromFile(fileName).then(source => {
 			let values = Object.values(firstObject); //create array of values
 			columns = columns.join(", "); //join coulmns into string 
 			values = "'" + values.join("', '") + "'"; //join values to string
-			return `INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}')) ON DUPLICATE KEY UPDATE first_name=first_name;` 
+			return `START TRANSACTION; INSERT IGNORE INTO ${tableName} (${columns}, status_id) VALUE (${values}, (SELECT id FROM client_statuses WHERE name='${source[i]['CLIENT STATUS']}')) ; SET @first_last_user_id = LAST_INSERT_ID();` 
 	
 		
 		};
-		function secondQueries(tname, tableobject, clientId){
+		function secondQueries(tname, tableobject){
 			let tableName = tname;
 
 			let columns = Object.keys(tableobject);  // create array of column names
 			let values = Object.values(tableobject); //create array of values
 			columns = columns.join(", "); //join coulmns into string 
 			values = "'" + values.join("', '") + "'"; //join values to string
-			return `START TRANSACTION; INSERT IGNORE INTO ${tableName} (${columns}, FOREIGN client_id) VALUE (${values}, '${clientId}'); COMMIT; `;
+			return ` INSERT IGNORE INTO ${tableName} (client_id, ${columns}) VALUE (@first_last_user_id, ${values});`;
 		};
 
 		(async () => {
+
+				//establish DB connection
+			const conn = mysql.createConnection({
+				host: hostname,
+				user: username,
+				password: password,
+				database: process.argv[3],
+				multipleStatements: true,
+			});
+
 			let firstQueryId = "";
 			
 			let firstQuery = new Promise( function(resolve, reject) {
 				resolve(conn.promise().query(
 					assembleQueryFromObject('clients', clientsTable)
+					+ secondQueries('client_phone_numbers', clientPhoneNumbersTable)
+					+ secondQueries('client_addresses', clientAddressesTable)
+					// + secondQueries('insurance_plans', insurancePlansTable)
+					+ secondQueries('client_contacts', clientContactsTable1)
+					+ secondQueries('client_contacts', clientContactsTable2)
+					+ secondQueries('client_diagnoses', clientDiagnosesTable)
+					+ secondQueries('client_treatments', clientTreatmentsTable)
+					+ secondQueries('client_children', clientChildrenTable) + ` COMMIT; `
 				)
 				// 	(err, res, fields) => {
 				// 		console.log(res.insertId);
@@ -296,48 +307,42 @@ csvtojson().fromFile(fileName).then(source => {
 				console.log(firstQueryId);
 			});
 
-			let secondQuery = new Promise( function(resolve, reject) {
-				resolve(conn.promise().query(
-					secondQueries('client_phone_numbers', clientPhoneNumbersTable, firstQueryId)
-					+ secondQueries('client_addresses', clientAddressesTable, firstQueryId)
-					+ secondQueries('insurance_plans', insurancePlansTable, firstQueryId)
-					+ secondQueries('client_contacts', clientContactsTable1, firstQueryId)
-					+ secondQueries('client_contacts', clientContactsTable2, firstQueryId)
-					+ secondQueries('client_diagnoses', clientDiagnosesTable, firstQueryId)
-					+ secondQueries('client_treatments', clientTreatmentsTable, firstQueryId)
-					+ secondQueries('client_children', clientChildrenTable, firstQueryId)
+			// let secondQuery = new Promise( function(resolve, reject) {
+			// 	resolve(conn.promise().query(
+			// 		secondQueries('client_phone_numbers', clientPhoneNumbersTable)
+			// 		+ secondQueries('client_addresses', clientAddressesTable)
+			// 		+ secondQueries('insurance_plans', insurancePlansTable)
+			// 		+ secondQueries('client_contacts', clientContactsTable1)
+			// 		+ secondQueries('client_contacts', clientContactsTable2)
+			// 		+ secondQueries('client_diagnoses', clientDiagnosesTable)
+			// 		+ secondQueries('client_treatments', clientTreatmentsTable)
+			// 		+ secondQueries('client_children', clientChildrenTable) + ` COMMIT; `
 					
-					),
-				)
-				reject((err) => {console.log(err + 'second reject')})
+			// 		),
+			// 	)
+			// 	reject((err) => {console.log(err + 'second reject')})
 
-			});
+			// });
 
-			let runSecomndQuery = secondQuery.then(() => {
-				console.log(firstQueryId)
-			});
+			// let runSecomndQuery = secondQuery.then(() => {
+			// 	console.log(firstQueryId)
+			// });
 
 			await assignLastInsertId.then(() => {
 				console.log(firstQueryId + "id set");
 			})
 				
 			
-			.then(runSecomndQuery
+			// .then(runSecomndQuery
 			
-			)
+			// )
 
 			.catch(err => {
 				console.error(err);
-				// conn.end();
+				conn.end();
 				return;
 			});
-			// await .then(	() =>
-			// 	{console.log("All items stored into database successfully")
-			// })		.catch(err => {
-			// 	console.error(err);
-			// 	// conn.end();
-			// 	return;
-			// });
+		
 		})();
 	
 	}
