@@ -169,13 +169,16 @@ csvtojson().fromFile(fileName).then(source => {
 			name: source[i]['LANGUAGE']
 				
 		};
-		let clientPhoneNumbersTable = {
+		let clientPhoneNumbersTable1 = {
 			//two insert statements
-			number: source[i]['CELL PHONE #'],
-			type: "cell",
 			
 			number: source[i]['HOME PHONE #'],
 			type: "home",
+		};
+		let clientPhoneNumbersTable2 = {
+			//two insert statements
+			number: source[i]['CELL PHONE #'],
+			type: "cell",
 		};
 		let clientAddressesTable = {
 			address_line_1: source[i]['ADDRESS'],
@@ -279,7 +282,8 @@ csvtojson().fromFile(fileName).then(source => {
 			let firstQuery = new Promise( function(resolve, reject) {
 				resolve(conn.promise().query(
 					assembleQueryFromObject('clients', clientsTable)
-					+ secondQueries('client_phone_numbers', clientPhoneNumbersTable)
+					+ secondQueries('client_phone_numbers', clientPhoneNumbersTable1)
+					+ secondQueries('client_phone_numbers', clientPhoneNumbersTable2)
 					+ secondQueries('client_addresses', clientAddressesTable)
 					// + secondQueries('insurance_plans', insurancePlansTable)
 					+ secondQueries('client_contacts', clientContactsTable1)
